@@ -6,6 +6,9 @@
 
 ## Project Overview
 
+> [!NOTE]
+> Derived from ML Agent: [**ML-Master**](https://github.com/sjtu-sai-agents/ML-Master)
+
 E³-ML-Master is a long-horizon, self-evolved ML agent framework that uses Monte Carlo Tree Search (MCTS) and LLM-driven code generation to solve machine learning competition tasks. The framework employs a dual-core design: **Envisioner** (global exploration decision maker) and **Executor** (parallel execution engine).
 
 ### Core Components
