@@ -519,7 +519,6 @@ TSWLatexianTemp*
 
 # custom ignore file
 **/*.pdf
-assets
 data
 uv.lock
 workspaces
