@@ -18,23 +18,21 @@ from omegaconf import OmegaConf
 
 sys.path.append(os.getcwd())
 
-from rich.progress import (
-    BarColumn,
-    MofNCompleteColumn,
-    Progress,
-    TextColumn,
-    TimeRemainingColumn,
-)
 from rich.status import Status
+from rich.console import Console
 
 from framework import Envisioner, Memory
 from interpreter.interpreter_parallel import Interpreter
 from utils.config_mcts import load_task_desc, prep_agent_workspace, load_cfg
+from utils.control_panel import start_control_panel, stop_control_panel, get_control_panel
 
 dotenv.load_dotenv(override=True)
 logger = logging.getLogger("ml-master")
-print(f"Using API_KEY: {os.environ.get("OPENAI_API_KEY")}")
-print(f"Using BASE_URL: {os.environ.get("BASE_URL")}")
+console = Console()
+
+# Print API configuration
+console.print(f"[dim]Using API_KEY: {os.environ.get('OPENAI_API_KEY', 'Not set')}[/dim]")
+console.print(f"[dim]Using BASE_URL: {os.environ.get('BASE_URL', 'Not set')}[/dim]")
 
 
 # ==================== Grading Functions ====================
@@ -158,7 +156,6 @@ def run():
     logger.addHandler(console_handler)
 
     logger.info(f'Starting run "{cfg.exp_name}" using Framework 2')
-
     # Load task description
     task_desc = load_task_desc(cfg)
 
@@ -176,7 +173,7 @@ def run():
     atexit.register(cleanup)
 
     # Create Interpreter
-    
+
     interpreter = Interpreter(
         cfg.workspace_dir,
         **OmegaConf.to_container(cfg.exec),
@@ -206,19 +203,15 @@ def run():
     with Status("Initializing root node..."):
         envisioner.initialize_root()
 
+    # Start control panel
+    console.print("\n[bold green]Starting Control Panel...[/bold green]")
+    control_panel = start_control_panel()
+    control_panel.add_log("Control panel started", "INFO")
+    control_panel.add_log(f"Experiment: {cfg.exp_name}", "INFO")
+    control_panel.add_log(f"Total steps: {cfg.agent.steps}", "INFO")
+
     # Setup progress tracking
     total_steps = cfg.agent.steps
-    prog = Progress(
-        TextColumn("[progress.description]{task.description}"),
-        BarColumn(bar_width=20),
-        MofNCompleteColumn(),
-        TimeRemainingColumn(),
-    )
-    prog.add_task("Progress:", total=total_steps, completed=0)
-
-    # Main MCTS loop
-    logger.info(f"Starting MCTS search with {total_steps} steps")
-
     budget_per_step = 3  # Number of MCTS iterations per step
     best_score = float('inf')  # Track best grading score
     best_score_history = []
@@ -227,11 +220,26 @@ def run():
     ground_truth_path = "data/nomad2018-predict-transparent-conductors/prepared/private/test.csv"
     submission_path = f"{cfg.workspace_dir}/best_submission/submission.csv"
 
+    # Main MCTS loop
+    control_panel.add_log(f"Starting MCTS search with {total_steps} steps", "INFO")
+
     for step in range(total_steps):
+        # Update control panel with current step
+        control_panel.update_envisioner(
+            step=step + 1,
+            total_steps=total_steps,
+            budget=budget_per_step,
+            best_metric=envisioner.best_metric,
+            tree_size=envisioner.get_statistics().get('tree_size', 0),
+            **envisioner.stats
+        )
+
         logger.info(f"=== Step {step + 1}/{total_steps} ===")
+        control_panel.add_log(f"Starting step {step + 1}/{total_steps}", "INFO")
 
         try:
             # Execute one MCTS step (selection -> expansion -> simulation -> backpropagation)
+            control_panel.update_envisioner(phase="MCTS_STEP")
             envisioner.mcts_step(budget=budget_per_step)
 
             # Get statistics
@@ -244,12 +252,24 @@ def run():
                 f"simulations={stats['simulations']}"
             )
 
+            # Update control panel with stats
+            control_panel.update_envisioner(
+                best_metric=envisioner.best_metric,
+                tree_size=stats['tree_size'],
+                **stats
+            )
+
             # Log memory stats
             memory_stats = stats.get('memory_stats', {})
             if memory_stats:
                 logger.info(
                     f"Memory: total_entries={memory_stats.get('total_entries', 0)}, "
                     f"best_reward={memory_stats.get('best_reward', 'N/A')}"
+                )
+                control_panel.add_log(
+                    f"Memory: {memory_stats.get('total_entries', 0)} entries, "
+                    f"success: {memory_stats.get('success_count', 0)}",
+                    "INFO"
                 )
 
             # Grade best submission
@@ -261,18 +281,30 @@ def run():
                     logger.info(
                         f"New best score: {current_score:.6f} at step {step + 1}"
                     )
+                    control_panel.add_log(
+                        f"[NEW BEST] Score: {current_score:.6f} at step {step + 1}",
+                        "SUCCESS"
+                    )
+                else:
+                    control_panel.add_log(f"Current score: {current_score:.6f}", "INFO")
                 logger.info(f"Current score: {current_score:.6f}, Best score: {best_score:.6f}")
 
             # Save memory periodically
             if (step + 1) % 5 == 0:
                 memory.save()
                 logger.info(f"Memory saved at step {step + 1}")
+                control_panel.add_log(f"Memory saved at step {step + 1}", "INFO")
 
             global_step[0] = step + 1
 
         except Exception as e:
             logger.error(f"Step {step + 1} failed: {e}")
+            control_panel.add_log(f"Step {step + 1} failed: {e}", "ERROR")
             continue
+
+    # Stop control panel before final summary
+    stop_control_panel()
+    console.print("\n[bold yellow]Control panel stopped - Generating final summary...[/bold yellow]\n")
 
     # Cleanup
     interpreter.cleanup_session(-1)
@@ -289,9 +321,23 @@ def run():
 
     # Save final results
     memory.save()
+    stats = envisioner.get_statistics()
+    console.print(f"[bold cyan]Experiment:[/bold cyan] {cfg.exp_name}")
+    console.print(f"[bold cyan]Total Steps:[/bold cyan] {total_steps}")
+    console.print(f"[bold cyan]Tree Size:[/bold cyan] {stats['tree_size']} nodes")
+    console.print(f"[bold cyan]Total Selections:[/bold cyan] {stats['selections']}")
+    console.print(f"[bold cyan]Total Expansions:[/bold cyan] {stats['expansions']}")
+    console.print(f"[bold cyan]Total Simulations:[/bold cyan] {stats['simulations']}")
+    console.print(f"[bold cyan]Best Metric:[/bold cyan] {envisioner.best_metric:.6f if envisioner.best_metric else 'N/A'}")
 
     # Log grading summary
     if best_score_history:
+        console.print(f"\n[bold yellow]Grading Summary:[/bold yellow]")
+        console.print(f"[yellow]  Total graded steps: {len(best_score_history)}[/yellow]")
+        console.print(f"[yellow]  Best score: {best_score:.6f}[/yellow]")
+        console.print(f"[yellow]  Final score: {best_score_history[-1]:.6f}[/yellow]")
+        console.print(f"[yellow]  Score history (last 10): {best_score_history[-10:]}[/yellow]")
+
         logger.info("=" * 60)
         logger.info("=== Grading Summary ===")
         logger.info(f"Total graded steps: {len(best_score_history)}")
@@ -301,6 +347,9 @@ def run():
         logger.info("=" * 60)
 
     elapsed_time = time.time() - begin_time
+    elapsed_min = int(elapsed_time // 60)
+    elapsed_sec = int(elapsed_time % 60)
+    console.print(f"\n[bold green]Total runtime:[/bold green] {elapsed_min:02d}:{elapsed_sec:02d}")
     logger.info(f"Run completed in {elapsed_time:.2f} seconds")
 
     return best_node

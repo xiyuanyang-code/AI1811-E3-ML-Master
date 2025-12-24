@@ -12,8 +12,19 @@ from typing import List, Dict, Any, Optional, Tuple, Set
 from dataclasses import dataclass, field
 from datetime import datetime
 from collections import deque
+from rich.console import Console
 
 logger = logging.getLogger(__name__)
+
+# Console for colored output
+console = Console()
+
+
+def print_memory_header(title: str, color: str = "blue"):
+    """Print memory-related header"""
+    console.print(f"\n[bold {color}]{'=' * 60}[/bold {color}]")
+    console.print(f"[bold {color}]{title}[/bold {color}]")
+    console.print(f"[bold {color}]{'=' * 60}[/bold {color}]")
 
 
 @dataclass
@@ -127,6 +138,12 @@ class Memory:
         # 线程安全
         self.lock = threading.RLock()
 
+        # 打印初始化信息
+        console.print(f"[bold blue]Memory System Initialized[/bold blue]")
+        console.print(f"[blue]  Capacity: {capacity} entries[/blue]")
+        if save_path:
+            console.print(f"[blue]  Save path: {save_path}[/blue]")
+
         # 加载已有记忆
         if save_path:
             self._load()
@@ -228,6 +245,11 @@ class Memory:
             # 容量管理
             if len(self.entries) > self.capacity:
                 self._prune_entries()
+
+            # 打印添加日志（带颜色）
+            status_color = "green" if reward > 0 else "red" if reward < 0 else "yellow"
+            status_symbol = "✓" if not is_buggy and reward > 0 else "✗" if is_buggy else "○"
+            console.print(f"[{status_color}]  {status_symbol} Memory: Node {node_id[:8]} | Reward: {reward:.3f} | Bug: {is_buggy}[/{status_color}]")
 
             logger.debug(f"Added memory entry for node {node_id[:8]}, reward: {reward:.4f}")
 

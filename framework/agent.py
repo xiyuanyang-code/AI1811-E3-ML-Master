@@ -48,6 +48,42 @@ def print_llm_output(title: str, content: str, max_length: int = 1000):
         console.print(f"\n[bold yellow]LLM Output ({title}): [Empty or None][/bold yellow]\n")
 
 
+def print_header(title: str, color: str = "cyan", width: int = 70):
+    """Print a formatted header with the given color"""
+    console.print(f"\n[bold {color}]{'=' * width}[/bold {color}]")
+    console.print(f"[bold {color}]{title.center(width)}[/bold {color}]")
+    console.print(f"[bold {color}]{'=' * width}[/bold {color}]\n")
+
+
+def print_phase(phase_name: str, step: int, total: int, color: str = "yellow"):
+    """Print MCTS phase information"""
+    console.print(f"[bold {color}][PHASE {step}/{total}] {phase_name}[/bold {color}]")
+
+
+def print_node_info(node, detail: str = "", color: str = "white"):
+    """Print node information with color"""
+    console.print(f"[{color}]Node {node.id[:8]} | V:{node.visits} | E:{node.expansion}/{node.max_expansions} | Value:{node.value:.4f}[/{color}]")
+    if detail:
+        console.print(f"[dim]{detail}[/dim]")
+
+
+def print_result(success: bool, message: str, node_id: str = ""):
+    """Print execution result with appropriate color"""
+    prefix = f"Node {node_id[:8]}: " if node_id else ""
+    if success:
+        console.print(f"[green]✓ {prefix}{message}[/green]")
+    else:
+        console.print(f"[red]✗ {prefix}{message}[/red]")
+
+
+def print_metric(metric: float, reward: float, improved: bool = False):
+    """Print metric with color based on improvement"""
+    if improved:
+        console.print(f"[bold green]★ METRIC: {metric:.6f} | Reward: {reward:.2f} [IMPROVED!]★[/bold green]")
+    else:
+        console.print(f"[cyan]METRIC: {metric:.6f} | Reward: {reward:.2f}[/cyan]")
+
+
 # ==================== Function Spec for LLM ====================
 
 REVIEW_FUNC_SPEC = FunctionSpec(
@@ -487,7 +523,7 @@ Return your code in a <code> tag."""
                     {"role": "user", "content": "Please generate the initial code."},
                 ],
                 temperature=0.7,
-                max_tokens=3000,
+                max_tokens=10000,
             )
 
             content = response.choices[0].message.content
@@ -874,7 +910,7 @@ Keep the summary concise (2-3 paragraphs)."""
                     model=self.model_name,
                     messages=summary_messages,
                     temperature=0.3,
-                    max_tokens=1000,
+                    max_tokens=5000,
                 )
 
                 llm_summary = summary_response.choices[0].message.content.strip()
@@ -1105,6 +1141,14 @@ class Envisioner:
         self.best_node: Optional[MCTSNode] = None
         self.best_lock = threading.Lock()
 
+        # 打印初始化信息
+        print_header("ENVISIONER INITIALIZED", "magenta")
+        console.print(f"[bold cyan]Model (Strategy):[/bold cyan] {self.model_name}")
+        console.print(f"[bold cyan]Model (Feedback):[/bold cyan] {self.feedback_model_name}")
+        console.print(f"[bold cyan]Exploration Constant:[/bold cyan] {self.exploration_constant}")
+        console.print(f"[bold cyan]Max Executors:[/bold cyan] {self.max_executor_count}")
+        console.print(f"[bold cyan]Max Node Expansions:[/bold cyan] {self.max_node_expansions}")
+
     def _load_system_prompt(self, path: str) -> str:
         """加载系统提示词"""
         try:
@@ -1134,6 +1178,7 @@ class Envisioner:
             需要扩展的节点
         """
         self.stats["selections"] += 1
+        print_phase("SELECTION - Selecting node for expansion", 1, 4, "blue")
 
         with self.tree_lock:
             if node is None:
@@ -1143,6 +1188,7 @@ class Envisioner:
                 raise ValueError("No root node available for selection")
 
             current = node
+            path = [current]
 
             # 向下遍历，直到找到未完全扩展的节点
             while current.is_fully_expanded_with_expected() and current.children:
@@ -1150,6 +1196,16 @@ class Envisioner:
                 current = current.select_best_child(self.exploration_constant)
                 if current is None:
                     break
+                path.append(current)
+
+            # 打印选择路径
+            console.print(f"[dim]  Selection path:[/dim]")
+            for i, n in enumerate(path):
+                indent = "    " * i
+                uct = n.get_uct_value(self.exploration_constant)
+                console.print(f"[dim]{indent}→ Node {n.id[:8]} (UCT:{uct:.4f}, V:{n.visits})[/dim]")
+
+            console.print(f"[bold blue]Selected node:[/bold blue] {current.id[:8]} | V:{current.visits} | E:{current.expansion}/{current.max_expansions}")
 
             logger.debug(
                 f"Selection: selected node {current.id[:8]}, "
@@ -1180,10 +1236,13 @@ class Envisioner:
             新生成的子节点列表
         """
         self.stats["expansions"] += 1
+        print_phase("EXPANSION - Generating new strategies", 2, 4, "yellow")
+        console.print(f"[yellow]Target node:[/yellow] {node.id[:8]} | Generating {num_strategies} strategies...")
 
         # 检查是否可以扩展，并提前锁定节点
         with self.tree_lock:
             if node.is_fully_expanded_with_expected():
+                console.print(f"[dim]  Node {node.id[:8]} is already fully expanded[/dim]")
                 logger.debug(f"Node {node.id[:8]} is already fully expanded")
                 return []
 
@@ -1191,6 +1250,7 @@ class Envisioner:
             # 修复：使用 >= 而不是 >，因为当 expected_child_count == len(children) 时，
             # 说明之前的扩展已经完成（或者失败后重置），可以重新扩展
             if node.expected_child_count > len(node.children):
+                console.print(f"[dim]  Node {node.id[:8]} has pending expansions ({len(node.children)}/{node.expected_child_count})[/dim]")
                 logger.debug(
                     f"Node {node.id[:8]} already has pending expansions "
                     f"({len(node.children)}/{node.expected_child_count})"
@@ -1202,9 +1262,11 @@ class Envisioner:
             node.set_expected_children(len(node.children) + num_strategies)
 
         # 准备上下文（在锁外执行）
+        console.print(f"[cyan]  Fetching memory context...[/cyan]")
         memory_context = self._fetch_memory(node)
 
         # 生成新策略（在锁外执行，耗时操作）
+        console.print(f"[cyan]  Calling LLM to generate strategies...[/cyan]")
         new_strategies = self._generate_strategies(
             task_description=self.task_description,
             memory_context=memory_context,
@@ -1215,6 +1277,7 @@ class Envisioner:
             # 失败时重置预期数量
             with self.tree_lock:
                 node.set_expected_children(len(node.children))
+            console.print(f"[red]  Failed to generate strategies for node {node.id[:8]}[/red]")
             logger.warning(
                 f"Failed to generate strategies for node {node.id[:8]}. "
                 f"Node state: expansion={node.expansion}/{node.max_expansions}, "
@@ -1224,8 +1287,9 @@ class Envisioner:
 
         # 创建新节点
         child_nodes = []
+        console.print(f"[green]  Creating {len(new_strategies)} child nodes:[/green]")
         with self.tree_lock:
-            for strategy_plan in new_strategies:
+            for idx, strategy_plan in enumerate(new_strategies):
                 strategy = Strategy(
                     id=uuid.uuid4().hex,
                     plan=strategy_plan.get("plan_content", ""),
@@ -1242,6 +1306,11 @@ class Envisioner:
                 node.add_child(child_node)
                 child_nodes.append(child_node)
 
+                # 打印新节点信息
+                plan_preview = strategy_plan.get("plan_content", "")[:80]
+                console.print(f"[green]    [{idx+1}] Node {child_node.id[:8]}[/green]")
+                console.print(f"[dim]        Plan: {plan_preview}...[/dim]")
+
             # 更新扩展次数
             node.increment_expansion()
 
@@ -1249,6 +1318,7 @@ class Envisioner:
                 f"Expanded node {node.id[:8]}, " f"created {len(child_nodes)} children"
             )
 
+        console.print(f"[bold yellow]Expansion complete:[/bold yellow] Created {len(child_nodes)} children from node {node.id[:8]}")
         return child_nodes
 
     def simulation(self, nodes: List[MCTSNode]) -> Dict[str, ExecutionResult]:
@@ -1273,8 +1343,11 @@ class Envisioner:
             节点 ID 到执行结果的映射
         """
         self.stats["simulations"] += len(nodes)
+        print_phase("SIMULATION - Executing strategies in parallel", 3, 4, "green")
+        console.print(f"[green]Executing {len(nodes)} nodes with {self.max_executor_count} parallel workers...[/green]")
 
         results = {}
+        completed = 0
 
         with ThreadPoolExecutor(max_workers=self.max_executor_count) as executor:
             future_to_node = {
@@ -1284,13 +1357,30 @@ class Envisioner:
             for future in future_to_node:
                 node = future_to_node[future]
                 try:
+                    console.print(f"[cyan]  Running node {node.id[:8]}...[/cyan]")
                     result = future.result(timeout=1800)
                     results[node.id] = result
+                    completed += 1
+
+                    # 打印结果
+                    if result.success:
+                        print_metric(
+                            result.metric or 0,
+                            result.reward,
+                            improved=(self.best_metric is not None and
+                                     result.metric is not None and
+                                     ((result.lower_is_better and result.metric < self.best_metric) or
+                                      (not result.lower_is_better and result.metric > self.best_metric)))
+                        )
+                    else:
+                        console.print(f"[red]  ✗ Node {node.id[:8]} failed: {result.summary[:60]}...[/red]")
+
                     logger.info(
                         f"Simulation completed for node {node.id[:8]}, "
                         f"reward: {result.reward:.3f}"
                     )
                 except Exception as e:
+                    console.print(f"[red]  ✗ Node {node.id[:8]} exception: {str(e)[:60]}[/red]")
                     logger.error(f"Simulation failed for node {node.id[:8]}: {e}")
                     results[node.id] = ExecutionResult(
                         success=False,
@@ -1299,6 +1389,7 @@ class Envisioner:
                         logger_info=[f"Error: {str(e)}"],
                     )
 
+        console.print(f"[bold green]Simulation complete:[/bold green] {completed}/{len(nodes)} nodes executed")
         return results
 
     def backpropagation(
@@ -1317,6 +1408,9 @@ class Envisioner:
             results: 执行结果字典
         """
         self.stats["backpropagations"] += len(nodes)
+        print_phase("BACKPROPAGATION - Updating search tree", 4, 4, "magenta")
+
+        improvements = 0
 
         for node in nodes:
             if node.id not in results:
@@ -1329,12 +1423,14 @@ class Envisioner:
             # 更新全局最佳节点
             if not result.is_buggy and metric is not None:
                 with self.best_lock:
+                    is_new_best = False
+                    improvement_val = 0.0
+
                     if self.best_metric is None:
                         self.best_metric = metric
                         self.best_node = node
-                        logger.info(
-                            f"New best metric: {metric:.4f} (node {node.id[:8]})"
-                        )
+                        is_new_best = True
+                        console.print(f"[bold green]  ★ NEW BEST METRIC: {metric:.6f} (node {node.id[:8]})[/bold green]")
                     else:
                         # 需要判断 lower_is_better
                         lower_is_better = (
@@ -1346,30 +1442,37 @@ class Envisioner:
                         if lower_is_better:
                             # 越小越好
                             if metric < self.best_metric:
-                                improvement = self.best_metric - metric
+                                improvement_val = self.best_metric - metric
                                 self.best_metric = metric
                                 self.best_node = node
-                                logger.info(
-                                    f"New best metric: {metric:.4f} (improvement: {improvement:.4f}, "
-                                    f"node {node.id[:8]})"
-                                )
+                                is_new_best = True
+                                improvements += 1
                         else:
                             # 越大越好
                             if metric > self.best_metric:
-                                improvement = metric - self.best_metric
+                                improvement_val = metric - self.best_metric
                                 self.best_metric = metric
                                 self.best_node = node
-                                logger.info(
-                                    f"New best metric: {metric:.4f} (improvement: {improvement:.4f}, "
-                                    f"node {node.id[:8]})"
-                                )
+                                is_new_best = True
+                                improvements += 1
+
+                        if is_new_best:
+                            console.print(f"[bold green]  ★ NEW BEST METRIC: {metric:.6f} (improvement: {improvement_val:.6f}, node {node.id[:8]})[/bold green]")
+                            logger.info(
+                                f"New best metric: {metric:.4f} (improvement: {improvement_val:.4f}, "
+                                f"node {node.id[:8]})"
+                            )
 
             # 回溯更新路径
             current = node
+            path_length = 0
             with self.tree_lock:
                 while current is not None:
                     current.update(reward)
                     current = current.parent
+                    path_length += 1
+
+            console.print(f"[magenta]  Updated node {node.id[:8]}: reward={reward:.2f}, path_length={path_length}[/magenta]")
 
             # 记录到 Memory
             self.memory.add_entry(
@@ -1392,6 +1495,8 @@ class Envisioner:
 
             logger.debug(f"Backpropagated reward {reward:.3f} from node {node.id[:8]}")
 
+        console.print(f"[bold magenta]Backpropagation complete:[/bold magenta] Updated {len(nodes)} nodes, {improvements} new records")
+
     # ==================== MCTS Search Loop ====================
 
     def mcts_step(self, budget: int = 10):
@@ -1401,20 +1506,25 @@ class Envisioner:
         Args:
             budget: 本次搜索的迭代次数
         """
-        logger.info(f"Starting MCTS step with budget {budget}")
+        print_header(f"MCTS SEARCH - Budget: {budget} iterations", "bright_blue")
 
         for i in range(budget):
             try:
+                console.print(f"\n[bold white]{'─' * 70}[/bold white]")
+                console.print(f"[bold white]MCTS Iteration {i + 1}/{budget}[/bold white]")
+                console.print(f"[bold white]{'─' * 70}[/bold white]")
+
                 # 1. Selection
                 selected_node = self.selection()
-                logger.info(f"Selecting Node for {selected_node}")
                 if selected_node is None:
+                    console.print(f"[yellow]No node selected for expansion[/yellow]")
                     logger.warning("No node selected for expansion")
                     continue
 
                 # 2. Expansion & Task Dispatch
                 new_nodes = self.expansion_and_dispatch(selected_node, num_strategies=3)
                 if not new_nodes:
+                    console.print(f"[dim]No new nodes created from {selected_node.id[:8]}[/dim]")
                     logger.debug(f"No new nodes created from {selected_node.id[:8]}")
                     continue
 
@@ -1424,12 +1534,50 @@ class Envisioner:
                 # 4. Backpropagation
                 self.backpropagation(new_nodes, results)
 
+                # 打印迭代摘要
+                self._print_iteration_summary(i + 1, budget)
+
                 logger.debug(f"MCTS iteration {i + 1}/{budget} completed")
 
             except Exception as e:
+                console.print(f"[red]MCTS iteration {i + 1} failed: {e}[/red]")
                 logger.error(f"MCTS iteration {i + 1} failed: {e}")
 
+        # 打印最终统计
+        self._print_final_statistics()
         logger.info(f"MCTS step completed. Statistics: {self.stats}")
+
+    def _print_iteration_summary(self, iteration: int, total: int):
+        """打印当前迭代摘要"""
+        stats = self.get_statistics()
+        console.print(f"\n[bold cyan]Iteration {iteration}/{total} Summary:[/bold cyan]")
+        console.print(f"[cyan]  Tree Size: {stats['tree_size']} nodes[/cyan]")
+        console.print(f"[cyan]  Best Metric: {self.best_metric:.6f if self.best_metric else 'N/A'}[/cyan]")
+        console.print(f"[cyan]  Selections: {stats['selections']} | Expansions: {stats['expansions']}[/cyan]")
+        console.print(f"[cyan]  Simulations: {stats['simulations']} | Backprops: {stats['backpropagations']}[/cyan]")
+
+    def _print_final_statistics(self):
+        """打印最终统计信息"""
+        console.print(f"\n[bold green]{'=' * 70}[/bold green]")
+        console.print(f"[bold green]FINAL MCTS STATISTICS[/bold green]")
+        console.print(f"[bold green]{'=' * 70}[/bold green]")
+
+        stats = self.get_statistics()
+        mem_stats = stats.get('memory_stats', {})
+
+        console.print(f"[white]  Total Selections:[/white] {stats['selections']}")
+        console.print(f"[white]  Total Expansions:[/white] {stats['expansions']}")
+        console.print(f"[white]  Total Simulations:[/white] {stats['simulations']}")
+        console.print(f"[white]  Total Backpropagations:[/white] {stats['backpropagations']}")
+        console.print(f"[white]  Tree Size:[/white] {stats['tree_size']} nodes")
+        console.print(f"[white]  Total Explorations:[/white] {mem_stats.get('total_entries', 0)}")
+        console.print(f"[white]  Success Rate:[/white] {mem_stats.get('success_count', 0) / max(mem_stats.get('total_entries', 1), 1) * 100:.1f}%")
+        console.print(f"[bold green]  Best Metric Achieved:[/bold green] {self.best_metric:.6f if self.best_metric else 'N/A'}")
+
+        if self.best_node:
+            console.print(f"[bold green]  Best Node ID:[/bold green] {self.best_node.id[:8]}")
+
+        console.print(f"[bold green]{'=' * 70}[/bold green]\n")
 
     # ==================== Helper Methods ====================
 
@@ -1505,7 +1653,7 @@ Provide your response below:"""
                     {"role": "user", "content": extraction_prompt},
                 ],
                 temperature=0.0,  # 使用确定性输出
-                max_tokens=3000,
+                max_tokens=5000,
             )
 
             extracted_content = response.choices[0].message.content
@@ -1566,7 +1714,7 @@ Provide your response below:"""
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.7,
-                max_tokens=2000,
+                max_tokens=5000,
             )
 
             content = response.choices[0].message.content
@@ -1645,7 +1793,11 @@ Provide your response below:"""
         Args:
             initial_strategy: 初始策略（可选）
         """
+        print_header("INITIALIZING ROOT NODE", "yellow")
+
         if initial_strategy is None:
+            console.print(f"[cyan]Generating initial strategy using {self.model_name}...[/cyan]")
+
             # 构建详细的初始提示词，包含完整的任务描述
             initial_prompt = f"""You are participating in MLE-bench, an offline version of Kaggle competitions.
 
@@ -1687,12 +1839,15 @@ Please be specific but concise (2-3 paragraphs). Focus on the key insights that 
                     plan=content,
                     metadata={"agent": "envisioner_initial"},
                 )
+                console.print(f"[green]Initial strategy generated successfully[/green]")
 
         with self.tree_lock:
             self.root_node = MCTSNode(
                 initial_strategy, max_expansions=self.max_node_expansions
             )
 
+        console.print(f"[bold yellow]Root node initialized:[/bold yellow] {self.root_node.id[:8]}")
+        console.print(f"[yellow]Max expansions per node: {self.max_node_expansions}[/yellow]")
         logger.info(f"Root node initialized: {self.root_node.id[:8]}")
 
     def get_best_node(self) -> Optional[MCTSNode]:
