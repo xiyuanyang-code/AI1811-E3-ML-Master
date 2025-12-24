@@ -525,5 +525,7 @@ workspaces
 logs
 mle-bench
 
+**.yaml
+!utils/config_mcts_example.yaml
 
 recordings.json
