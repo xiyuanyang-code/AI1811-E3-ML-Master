@@ -4,7 +4,18 @@
   <img src="./assets/cover_new.png" width="80%" />
 </div>
 
-## Introduction
+## Project Overview
+
+E³-ML-Master is a long-horizon, self-evolved ML agent framework that uses Monte Carlo Tree Search (MCTS) and LLM-driven code generation to solve machine learning competition tasks. The framework employs a dual-core design: **Envisioner** (global exploration decision maker) and **Executor** (parallel execution engine).
+
+### Core Components
+
+- **Envisioner** (`framework/agent.py`): Maintains the global MCTS search tree, coordinates multiple parallel Executors, manages global Memory system, tracks global best node
+- **Executor** (`framework/agent.py`): Executes strategy code for specific nodes, uses LLM to extract metrics from execution output, supports multi-turn refinement for code optimization
+- **MCTSNode** (`framework/node.py`): Represents a strategy in the search tree with fields for visits, expansion, rewards, and UCT calculation
+- **Memory** (`framework/memory.py`): Context-aware memory system storing all exploration history with indexed retrieval
+- **Interpreter** (`interpreter/interpreter_parallel.py`): Parallel code execution engine that runs Python code in isolated environments
+- **Backend** (`backend/`): LLM API interface layer supporting OpenAI-compatible and Qwen backends
 
 
 ## Quick StartUp
