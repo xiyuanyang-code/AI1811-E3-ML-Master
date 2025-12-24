@@ -43,3 +43,6 @@ python main.py
 <div align="center">
   <img src="./assets/workflow_2.png" width="50%" />
 </div>
+
+> [!IMPORTANT]
+> All the source code of the new architecture is in `framework` folders.
