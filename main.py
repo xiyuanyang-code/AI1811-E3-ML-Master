@@ -24,7 +24,6 @@ from rich.console import Console
 from framework import Envisioner, Memory
 from interpreter.interpreter_parallel import Interpreter
 from utils.config_mcts import load_task_desc, prep_agent_workspace, load_cfg
-from utils.control_panel import start_control_panel, stop_control_panel, get_control_panel
 
 dotenv.load_dotenv(override=True)
 logger = logging.getLogger("ml-master")
@@ -203,13 +202,6 @@ def run():
     with Status("Initializing root node..."):
         envisioner.initialize_root()
 
-    # Start control panel
-    console.print("\n[bold green]Starting Control Panel...[/bold green]")
-    control_panel = start_control_panel()
-    control_panel.add_log("Control panel started", "INFO")
-    control_panel.add_log(f"Experiment: {cfg.exp_name}", "INFO")
-    control_panel.add_log(f"Total steps: {cfg.agent.steps}", "INFO")
-
     # Setup progress tracking
     total_steps = cfg.agent.steps
     budget_per_step = 3  # Number of MCTS iterations per step
@@ -220,26 +212,12 @@ def run():
     ground_truth_path = "data/nomad2018-predict-transparent-conductors/prepared/private/test.csv"
     submission_path = f"{cfg.workspace_dir}/best_submission/submission.csv"
 
-    # Main MCTS loop
-    control_panel.add_log(f"Starting MCTS search with {total_steps} steps", "INFO")
 
     for step in range(total_steps):
-        # Update control panel with current step
-        control_panel.update_envisioner(
-            step=step + 1,
-            total_steps=total_steps,
-            budget=budget_per_step,
-            best_metric=envisioner.best_metric,
-            tree_size=envisioner.get_statistics().get('tree_size', 0),
-            **envisioner.stats
-        )
-
         logger.info(f"=== Step {step + 1}/{total_steps} ===")
-        control_panel.add_log(f"Starting step {step + 1}/{total_steps}", "INFO")
 
         try:
             # Execute one MCTS step (selection -> expansion -> simulation -> backpropagation)
-            control_panel.update_envisioner(phase="MCTS_STEP")
             envisioner.mcts_step(budget=budget_per_step)
 
             # Get statistics
@@ -252,24 +230,12 @@ def run():
                 f"simulations={stats['simulations']}"
             )
 
-            # Update control panel with stats
-            control_panel.update_envisioner(
-                best_metric=envisioner.best_metric,
-                tree_size=stats['tree_size'],
-                **stats
-            )
-
             # Log memory stats
             memory_stats = stats.get('memory_stats', {})
             if memory_stats:
                 logger.info(
                     f"Memory: total_entries={memory_stats.get('total_entries', 0)}, "
                     f"best_reward={memory_stats.get('best_reward', 'N/A')}"
-                )
-                control_panel.add_log(
-                    f"Memory: {memory_stats.get('total_entries', 0)} entries, "
-                    f"success: {memory_stats.get('success_count', 0)}",
-                    "INFO"
                 )
 
             # Grade best submission
@@ -281,29 +247,19 @@ def run():
                     logger.info(
                         f"New best score: {current_score:.6f} at step {step + 1}"
                     )
-                    control_panel.add_log(
-                        f"[NEW BEST] Score: {current_score:.6f} at step {step + 1}",
-                        "SUCCESS"
-                    )
-                else:
-                    control_panel.add_log(f"Current score: {current_score:.6f}", "INFO")
                 logger.info(f"Current score: {current_score:.6f}, Best score: {best_score:.6f}")
 
             # Save memory periodically
             if (step + 1) % 5 == 0:
                 memory.save()
                 logger.info(f"Memory saved at step {step + 1}")
-                control_panel.add_log(f"Memory saved at step {step + 1}", "INFO")
 
             global_step[0] = step + 1
 
         except Exception as e:
             logger.error(f"Step {step + 1} failed: {e}")
-            control_panel.add_log(f"Step {step + 1} failed: {e}", "ERROR")
             continue
 
-    # Stop control panel before final summary
-    stop_control_panel()
     console.print("\n[bold yellow]Control panel stopped - Generating final summary...[/bold yellow]\n")
 
     # Cleanup

@@ -34,11 +34,31 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
-def print_llm_output(title: str, content: str, max_length: int = 1000):
-    """Print LLM output in green color to console for monitoring"""
+def print_llm_output(title: str, content: str, max_length: int = 1000, head_tail: int = 500):
+    """Print LLM output in green color to console for monitoring
+
+    Args:
+        title: Title for the output section
+        content: The content to display
+        max_length: Maximum length before truncating (if showing only head)
+        head_tail: Number of characters to show from head and tail when truncating
+    """
     if content:
-        # Truncate if too long
-        display_content = content if len(content) <= max_length else content[:max_length] + "\n... [truncated] ..."
+        # Check if content is too long
+        total_length = len(content)
+        if total_length <= max_length:
+            display_content = content
+        else:
+            # Show head and tail with ellipsis in between
+            head = content[:head_tail]
+            tail = content[-head_tail:] if total_length > head_tail * 2 else ""
+            truncated_info = f"\n... [{total_length - head_tail * 2} characters truncated] ..."
+
+            if tail:
+                display_content = head + truncated_info + "\n" + tail
+            else:
+                display_content = head + truncated_info
+
         console.print(f"\n[bold green]{'=' * 60}[/bold green]")
         console.print(f"[bold green]{title}[/bold green]")
         console.print(f"[bold green]{'=' * 60}[/bold green]")
