@@ -34,6 +34,13 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
+def truncate_for_console(msg: str, max_length: int = 200) -> str:
+    """截断消息用于控制台显示（完整信息仍在日志文件中）"""
+    if not msg or len(msg) <= max_length:
+        return msg
+    return msg[:max_length] + f"... [truncated {len(msg) - max_length} chars, see log file for full output]"
+
+
 def print_llm_output(title: str, content: str, max_length: int = 1000, head_tail: int = 500):
     """Print LLM output in green color to console for monitoring
 
@@ -334,7 +341,9 @@ class Executor:
             return response
 
         except Exception as e:
-            logger.error(f"LLM parsing failed: {e}")
+            error_str = str(e)
+            # 完整错误信息记录到日志文件
+            logger.error(f"LLM parsing failed: {error_str}")
             return self._get_default_error_response()
 
     def _wrap_code(self, code: str, lang: str = "python") -> str:
@@ -465,8 +474,10 @@ class Executor:
             )
 
         except Exception as e:
+            error_str = str(e)
+            # 完整错误信息记录到日志文件
             logger.error(
-                f"Executor {self.executor_id} failed for node {node.id[:8]}: {e}"
+                f"Executor {self.executor_id} failed for node {node.id[:8]}: {error_str}"
             )
             return ExecutionResult(
                 success=False,
@@ -515,7 +526,11 @@ class Executor:
             refined_result = self._multi_turn_refine(node, initial_result)
             return refined_result
         except Exception as e:
-            logger.error(f"Refinement failed for node {node.id[:8]}: {e}")
+            error_str = str(e)
+            # 完整错误信息记录到日志文件
+            logger.error(f"Refinement failed for node {node.id[:8]}: {error_str}")
+            # 控制台显示截断信息
+            console.print(f"[red]Refinement failed for node {node.id[:8]}: {truncate_for_console(error_str)}[/red]")
             return initial_result
 
     def _generate_initial_code(self, node: MCTSNode) -> Optional[str]:
@@ -657,8 +672,10 @@ Return your code in a <code> tag."""
             )
 
         except Exception as e:
+            error_str = str(e)
+            # 完整错误信息记录到日志文件
             logger.error(
-                f"Executor {self.executor_id} failed for node {node.id[:8]}: {e}"
+                f"Executor {self.executor_id} failed for node {node.id[:8]}: {error_str}"
             )
             return ExecutionResult(
                 success=False,
@@ -846,10 +863,12 @@ Return your code in a <code> tag."""
                                 )
 
                         except Exception as e:
+                            error_str = str(e)
+                            # 完整错误信息记录到日志文件
                             logger.error(
-                                f"Tool call {tool_call.function.name} failed: {e}"
+                                f"Tool call {tool_call.function.name} failed: {error_str}"
                             )
-                            error_result = {"error": str(e), "success": False}
+                            error_result = {"error": error_str, "success": False}
                             messages.append(
                                 {
                                     "role": "tool",
@@ -861,7 +880,9 @@ Return your code in a <code> tag."""
                             )
 
             except Exception as e:
-                logger.error(f"Turn {turn + 1} failed: {e}")
+                error_str = str(e)
+                # 完整错误信息记录到日志文件
+                logger.error(f"Turn {turn + 1} failed: {error_str}")
                 break
 
         # === 最终代码生成和总结步骤 ===
@@ -1419,13 +1440,16 @@ class Envisioner:
                         f"reward: {result.reward:.3f}"
                     )
                 except Exception as e:
-                    console.print(f"[red]  ✗ Node {node.id[:8]} exception: {str(e)[:60]}[/red]")
-                    logger.error(f"Simulation failed for node {node.id[:8]}: {e}")
+                    error_str = str(e)
+                    # 完整错误信息记录到日志文件
+                    logger.error(f"Simulation failed for node {node.id[:8]}: {error_str}")
+                    # 控制台显示截断信息
+                    console.print(f"[red]  ✗ Node {node.id[:8]} exception: {truncate_for_console(error_str)}[/red]")
                     results[node.id] = ExecutionResult(
                         success=False,
                         reward=-1.0,
-                        summary=f"Execution failed: {str(e)}",
-                        logger_info=[f"Error: {str(e)}"],
+                        summary=f"Execution failed: {error_str}",
+                        logger_info=[f"Error: {error_str}"],
                     )
 
         console.print(f"[bold green]Simulation complete:[/bold green] {completed}/{len(nodes)} nodes executed")
@@ -1579,8 +1603,11 @@ class Envisioner:
                 logger.debug(f"MCTS iteration {i + 1}/{budget} completed")
 
             except Exception as e:
-                console.print(f"[red]MCTS iteration {i + 1} failed: {e}[/red]")
-                logger.error(f"MCTS iteration {i + 1} failed: {e}")
+                error_str = str(e)
+                # 完整错误信息记录到日志文件
+                logger.error(f"MCTS iteration {i + 1} failed: {error_str}")
+                # 控制台显示截断信息
+                console.print(f"[red]MCTS iteration {i + 1} failed: {truncate_for_console(error_str)}[/red]")
 
         # 打印最终统计
         self._print_final_statistics()

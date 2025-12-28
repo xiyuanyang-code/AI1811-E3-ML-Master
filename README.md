@@ -1,7 +1,7 @@
 # $E^3$-ML-Master: Advanced Envisioning-Executing for Goal-Driven Self-Evolved ML-Master
 
 <div align="center">
-  <img src="./assets/cover_new.png" width="80%" />
+  <img src="./assets/cover_new.png" width="100%" />
 </div>
 
 ## Project Overview
@@ -55,7 +55,7 @@ python main.py
 ## Detailed Workflow
 
 <div align="center">
-  <img src="./assets/workflow_2.png" width="50%" />
+  <img src="./assets/workflow_2.png" width="100%" />
 </div>
 
 > [!IMPORTANT]

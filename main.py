@@ -297,7 +297,12 @@ def run():
             global_step[0] = step + 1
 
         except Exception as e:
-            logger.error(f"Step {step + 1} failed: {e}")
+            error_str = str(e)
+            # 完整错误信息记录到日志文件
+            logger.error(f"Step {step + 1} failed: {error_str}")
+            # 控制台显示截断信息
+            truncated = error_str[:200] + f"... [truncated {len(error_str) - 200} chars]" if len(error_str) > 200 else error_str
+            console.print(f"[red]Step {step + 1} failed: {truncated}[/red]")
             continue
 
     console.print("\n[bold yellow]Control panel stopped - Generating final summary...[/bold yellow]\n")
