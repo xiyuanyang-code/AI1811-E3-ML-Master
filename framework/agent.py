@@ -1893,7 +1893,6 @@ Please be specific but concise (2-3 paragraphs). Focus on the key insights that 
                 temperature=0.7,
                 max_tokens=8000,
             )
-            print(response.model_dump())
 
             content = response.choices[0].message.content
 

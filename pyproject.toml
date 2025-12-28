@@ -7,6 +7,8 @@ requires-python = ">=3.13"
 dependencies = [
     "backoff>=2.2.1",
     "black>=25.9.0",
+    "catboost>=1.2.8",
+    "category-encoders>=2.9.0",
     "coolname>=2.2.0",
     "dataclasses-json>=0.6.7",
     "dotenv>=0.9.9",

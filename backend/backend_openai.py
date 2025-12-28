@@ -55,6 +55,12 @@ def _get_client_for_model(model: str, cfg: Config) -> openai.OpenAI:
         return _client_code
     else:
         return _client_feedback
+    
+def truncate_text(text, front_chars=200, back_chars=200):
+    """截取文本的前后部分"""
+    if len(text) > front_chars + back_chars:
+        return text[:front_chars] + " ... " + text[-back_chars:]
+    return text
 
 
 def query(
@@ -79,7 +85,7 @@ def query(
 
     t0 = time.time()
     message_print = messages[0]["content"]
-    print(f"\033[31m{message_print}\033[0m")
+    print(f"\033[31m{truncate_text(message_print)}\033[0m")
     completion = backoff_create(
         client.chat.completions.create,
         OPENAI_TIMEOUT_EXCEPTIONS,
@@ -92,7 +98,7 @@ def query(
 
     if func_spec is None:
         output = choice.message.content
-        print(f"\033[32m{output}\033[0m")
+        print(f"\033[32m{truncate_text(output)}\033[0m")
     else:
         assert (
             choice.message.tool_calls
@@ -102,7 +108,7 @@ def query(
         ), "Function name mismatch"
         try:
             output = json.loads(choice.message.tool_calls[0].function.arguments)
-            print(f"\033[32m{output}\033[0m")
+            print(f"\033[32m{truncate_text(output)}\033[0m")
         except json.JSONDecodeError as e:
             logger.error(
                 f"Error decoding the function arguments: {choice.message.tool_calls[0].function.arguments}"

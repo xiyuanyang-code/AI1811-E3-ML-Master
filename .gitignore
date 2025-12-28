@@ -529,3 +529,4 @@ mle-bench
 !utils/config_mcts_example.yaml
 
 recordings.json
+workspaces_backup
