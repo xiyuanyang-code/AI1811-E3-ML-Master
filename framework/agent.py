@@ -203,6 +203,7 @@ class Executor:
         executor_id: int = 0,
         enable_refinement: bool = False,
         max_refinement_turns: int = 3,
+        cfg=None,
     ):
         """
         Args:
@@ -215,6 +216,7 @@ class Executor:
             executor_id: 执行器 ID
             enable_refinement: 是否启用多轮微调
             max_refinement_turns: 最大微调轮数
+            cfg: Config 对象，用于 LLM 调用
         """
         self.interpreter = interpreter
         self.llm_client = OpenAI(
@@ -230,6 +232,7 @@ class Executor:
         self.enable_refinement = enable_refinement
         self.max_refinement_turns = max_refinement_turns
         self.web_search_fn = None  # 用户提供的 web_search 函数
+        self.cfg = cfg  # 存储 Config 对象
 
         # Multi-turn refinement 工具定义
         self.refinement_tools = [
@@ -308,6 +311,7 @@ class Executor:
                 func_spec=REVIEW_FUNC_SPEC,
                 model=self.model_name,
                 temperature=0.0,
+                cfg=self.cfg,
             )
 
             # 打印 LLM 输出到控制台（绿色）
@@ -319,8 +323,13 @@ class Executor:
                 return self._get_default_error_response()
 
             # 验证返回值
-            if not isinstance(response.get("metric"), float):
+            if not isinstance(response.get("metric"), (float, int)):
                 response["metric"] = None
+
+            # 确保 lower_is_better 不是 None
+            if response.get("lower_is_better") is None:
+                response["lower_is_better"] = True  # 默认为越小越好
+                logger.warning("LLM did not return lower_is_better, defaulting to True")
 
             return response
 
@@ -689,7 +698,7 @@ Return your code in a <code> tag."""
                 completion = self.llm_client.chat.completions.create(
                     model=self.model_name,
                     messages=messages,
-                    tools=self.refinement_tools,
+                    tools=[tool.as_openai_tool_dict for tool in self.refinement_tools],
                     temperature=0.7,
                 )
 
@@ -779,21 +788,29 @@ Return your code in a <code> tag."""
 
                                         if new_metric is not None:
                                             # 判断是否有改进
-                                            improvement = self._calculate_improvement(
-                                                new_metric,
-                                                best_metric,
-                                                initial_result.lower_is_better,
-                                            )
+                                            # 如果 best_metric 是 None，则视为有改进
+                                            if best_metric is None:
+                                                improvement = float('inf')
+                                            else:
+                                                improvement = self._calculate_improvement(
+                                                    new_metric,
+                                                    best_metric,
+                                                    initial_result.lower_is_better,
+                                                )
 
                                             if improvement > 0:
+                                                old_metric_str = f"{best_metric:.6f}" if best_metric is not None else "N/A"
+                                                improvement_str = f"{improvement:+.6f}" if improvement != float('inf') else "first valid metric"
                                                 logger.info(
-                                                    f"Improvement found: {best_metric:.6f} -> {new_metric:.6f} "
-                                                    f"({improvement:+.6f})"
+                                                    f"Improvement found: {old_metric_str} -> {new_metric:.6f} "
+                                                    f"({improvement_str})"
                                                 )
                                                 best_code = new_code
                                                 best_metric = new_metric
 
                                                 # 更新 best_result
+                                                # 确保 improvement 不包含特殊值，避免序列化问题
+                                                safe_improvement = float(improvement) if improvement != float('inf') else 0.0
                                                 best_result = ExecutionResult(
                                                     success=True,
                                                     reward=self._calculate_reward(
@@ -810,7 +827,7 @@ Return your code in a <code> tag."""
                                                     lower_is_better=initial_result.lower_is_better,
                                                     metadata={
                                                         "refinement_turn": turn + 1,
-                                                        "improvement": improvement,
+                                                        "improvement": safe_improvement,
                                                     },
                                                 )
 
@@ -858,7 +875,7 @@ Return your code in a <code> tag."""
 {best_code}
 ```
 
-**Best Metric Achieved:** {best_metric:.6f}
+**Best Metric Achieved:** {f"{best_metric:.6f}" if best_metric is not None else 'N/A'}
 
 **Task:** {self.task_description}
 
@@ -912,9 +929,9 @@ Format your response as:
 
                 summary_prompt = f"""Based on all the explorations and refinements during this multi-turn refinement process, please provide a comprehensive summary.
 
-**Initial Metric:** {initial_result.metric:.6f}
-**Best Metric Achieved:** {best_metric:.6f}
-**Improvement:** {best_metric - initial_result.metric:.6f}
+**Initial Metric:** {f"{initial_result.metric:.6f}" if initial_result.metric is not None else 'N/A'}
+**Best Metric Achieved:** {f"{best_metric:.6f}" if best_metric is not None else 'N/A'}
+**Improvement:** {f"{best_metric - initial_result.metric:.6f}" if initial_result.metric is not None and best_metric is not None else 'N/A'}
 **Number of Refinement Turns:** {self.max_refinement_turns}
 
 Please summarize:
@@ -964,7 +981,7 @@ Keep the summary concise (2-3 paragraphs)."""
                 )
 
                 logger.info(
-                    f"Final code metric: {validation_result.metric:.6f}, "
+                    f"Final code metric: {f'{validation_result.metric:.6f}' if validation_result.metric is not None else 'N/A'}, "
                     f"reward: {validation_result.reward:.2f}"
                 )
                 logger.info(f"Refinement summary:\n{llm_summary}")
@@ -982,8 +999,8 @@ Keep the summary concise (2-3 paragraphs)."""
         if best_code != node.strategy.code:
             node.strategy.code = best_code
             logger.info(
-                f"Refinement completed: metric improved from {initial_result.metric:.6f} "
-                f"to {best_metric:.6f}"
+                f"Refinement completed: metric improved from {f'{initial_result.metric:.6f}' if initial_result.metric is not None else 'N/A'} "
+                f"to {f'{best_metric:.6f}' if best_metric is not None else 'N/A'}"
             )
 
         return best_result
@@ -1006,7 +1023,7 @@ Keep the summary concise (2-3 paragraphs)."""
 {node.strategy.plan}
 
 **Initial Execution Result:**
-- Metric: {initial_result.metric}
+- Metric: {initial_result.metric if initial_result.metric is not None else 'N/A'}
 - Summary: {initial_result.summary}
 - Success: {initial_result.success}
 
@@ -1116,6 +1133,7 @@ class Envisioner:
         max_executor_count: int = 3,
         max_node_expansions: int = 5,
         system_prompt_path: str = "prompt/system_prompt.md",
+        cfg=None,
     ):
         self.interpreter = interpreter
         self.memory = memory
@@ -1125,6 +1143,7 @@ class Envisioner:
         self.exploration_constant = exploration_constant
         self.max_executor_count = max_executor_count
         self.max_node_expansions = max_node_expansions  # 节点最大扩展次数
+        self.cfg = cfg  # 存储 Config 对象
 
         # 初始化 LLM 客户端
         self.client = OpenAI(
@@ -1572,7 +1591,7 @@ class Envisioner:
         stats = self.get_statistics()
         console.print(f"\n[bold cyan]Iteration {iteration}/{total} Summary:[/bold cyan]")
         console.print(f"[cyan]  Tree Size: {stats['tree_size']} nodes[/cyan]")
-        console.print(f"[cyan]  Best Metric: {self.best_metric:.6f if self.best_metric else 'N/A'}[/cyan]")
+        console.print(f"[cyan]  Best Metric: {f'{self.best_metric:.6f}' if self.best_metric else 'N/A'}[/cyan]")
         console.print(f"[cyan]  Selections: {stats['selections']} | Expansions: {stats['expansions']}[/cyan]")
         console.print(f"[cyan]  Simulations: {stats['simulations']} | Backprops: {stats['backpropagations']}[/cyan]")
 
@@ -1592,7 +1611,7 @@ class Envisioner:
         console.print(f"[white]  Tree Size:[/white] {stats['tree_size']} nodes")
         console.print(f"[white]  Total Explorations:[/white] {mem_stats.get('total_entries', 0)}")
         console.print(f"[white]  Success Rate:[/white] {mem_stats.get('success_count', 0) / max(mem_stats.get('total_entries', 1), 1) * 100:.1f}%")
-        console.print(f"[bold green]  Best Metric Achieved:[/bold green] {self.best_metric:.6f if self.best_metric else 'N/A'}")
+        console.print(f"[bold green]  Best Metric Achieved:[/bold green] {f'{self.best_metric:.6f}' if self.best_metric else 'N/A'}")
 
         if self.best_node:
             console.print(f"[bold green]  Best Node ID:[/bold green] {self.best_node.id[:8]}")
@@ -1801,6 +1820,7 @@ Provide your response below:"""
             best_metric=best_metric,
             best_node=best_node,
             executor_id=id(threading.current_thread()),
+            cfg=self.cfg,
         )
         return executor.execute(node)
 
@@ -1844,7 +1864,7 @@ Please be specific but concise (2-3 paragraphs). Focus on the key insights that 
                     {"role": "user", "content": initial_prompt},
                 ],
                 temperature=0.7,
-                max_tokens=8888,
+                max_tokens=8000,
             )
             print(response.model_dump())
 

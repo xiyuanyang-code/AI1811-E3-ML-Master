@@ -26,6 +26,7 @@ dependencies = [
     "rich>=14.2.0",
     "scikit-learn>=1.7.2",
     "shutup>=0.2.0",
+    "tensorflow>=2.20.0",
     "torch>=2.9.0",
     "xgboost>=3.1.1",
 ]

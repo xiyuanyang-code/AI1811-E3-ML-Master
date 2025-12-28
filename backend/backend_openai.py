@@ -16,8 +16,6 @@ from utils.config_mcts import Config
 
 logger = logging.getLogger("ml-master")
 
-_client: openai.OpenAI = None  # type: ignore
-
 
 OPENAI_TIMEOUT_EXCEPTIONS = (
     openai.RateLimitError,
@@ -27,14 +25,36 @@ OPENAI_TIMEOUT_EXCEPTIONS = (
 )
 
 
+_client_code: openai.OpenAI = None  # For code generation
+_client_feedback: openai.OpenAI = None  # For feedback/metric extraction
+
+
 @once
-def _setup_openai_client(cfg:Config):
-    global _client
-    _client = openai.OpenAI(
+def _setup_openai_clients(cfg: Config):
+    global _client_code, _client_feedback
+    # Setup client for code generation
+    _client_code = openai.OpenAI(
+        base_url=cfg.agent.code.base_url,
+        api_key=cfg.agent.code.api_key,
+        max_retries=0,
+    )
+    # Setup client for feedback/metric extraction
+    _client_feedback = openai.OpenAI(
         base_url=cfg.agent.feedback.base_url,
         api_key=cfg.agent.feedback.api_key,
         max_retries=0,
     )
+
+
+def _get_client_for_model(model: str, cfg: Config) -> openai.OpenAI:
+    """根据模型名称获取对应的客户端"""
+    _setup_openai_clients(cfg)
+
+    # 如果是 code 模型，使用 code 客户端；否则使用 feedback 客户端
+    if model == cfg.agent.code.model:
+        return _client_code
+    else:
+        return _client_feedback
 
 
 def query(
@@ -42,10 +62,12 @@ def query(
     user_message: str | None,
     func_spec: FunctionSpec | None = None,
     convert_system_to_user: bool = False,
-    cfg:Config=None,
+    cfg: Config = None,
     **model_kwargs,
 ) -> tuple[OutputType, float, int, int, dict]:
-    _setup_openai_client(cfg)
+    # 根据模型获取对应的客户端
+    client = _get_client_for_model(model_kwargs.get("model", ""), cfg)
+
     filtered_kwargs: dict = select_values(notnone, model_kwargs)  # type: ignore
 
     messages = opt_messages_to_list(system_message, user_message, convert_system_to_user=convert_system_to_user)
@@ -59,7 +81,7 @@ def query(
     message_print = messages[0]["content"]
     print(f"\033[31m{message_print}\033[0m")
     completion = backoff_create(
-        _client.chat.completions.create,
+        client.chat.completions.create,
         OPENAI_TIMEOUT_EXCEPTIONS,
         messages=messages,
         **filtered_kwargs,

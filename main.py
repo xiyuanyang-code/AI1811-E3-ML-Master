@@ -191,11 +191,12 @@ def run():
             interpreter=interpreter,
             memory=memory,
             task_description=task_desc,
-            model_name="deepseek-reasoner",  # For strategy generation
-            feedback_model_name="deepseek-chat",  # For metric extraction
+            model_name=cfg.agent.code.model,  # For strategy generation (from config)
+            feedback_model_name=cfg.agent.feedback.model,  # For metric extraction (from config)
             exploration_constant=cfg.agent.decay.exploration_constant,
             max_executor_count=cfg.agent.search.parallel_search_num,
             max_node_expansions=5,  # Hardcoded default
+            cfg=cfg,
         )
 
     # Initialize root node
