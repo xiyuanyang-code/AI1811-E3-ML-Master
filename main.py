@@ -8,6 +8,7 @@ import logging
 import time
 import os
 import sys
+import json
 import atexit
 import dotenv
 import shutil
@@ -114,6 +115,31 @@ def run_grading(ground_truth_file_path: str, submission_file_path: str) -> float
 # ==================== Logging Filter ====================
 
 
+def save_grading_history(grading_history: list, log_dir):
+    """Save grading history to JSON file"""
+    grading_file = log_dir / "grading_history.json"
+    with open(grading_file, 'w', encoding='utf-8') as f:
+        json.dump(grading_history, f, indent=2, ensure_ascii=False)
+    logger.info(f"Grading history saved to {grading_file}")
+
+
+def update_grading_history(grading_history: list, step: int, score: float, stats: dict, log_dir):
+    """Update grading history and save to JSON"""
+    entry = {
+        "step": step + 1,
+        "score": float(score) if not pd.isna(score) else None,
+        "timestamp": time.time(),
+        "tree_size": stats.get('tree_size', 0),
+        "selections": stats.get('selections', 0),
+        "expansions": stats.get('expansions', 0),
+        "simulations": stats.get('simulations', 0),
+        "best_metric": stats.get('memory_stats', {}).get('best_reward', None),
+    }
+    grading_history.append(entry)
+    save_grading_history(grading_history, log_dir)
+    return grading_history
+
+
 class VerboseFilter(logging.Filter):
     """Filter (remove) logs that have verbose attribute set to True"""
 
@@ -209,6 +235,9 @@ def run():
     best_score = float('inf')  # Track best grading score
     best_score_history = []
 
+    # Track grading scores for each step (will be saved to JSON)
+    grading_history = []
+
     # Grading paths (for nomad2018-predict-transparent-conductors)
     ground_truth_path = "data/nomad2018-predict-transparent-conductors/prepared/private/test.csv"
     submission_path = f"{cfg.workspace_dir}/best_submission/submission.csv"
@@ -250,6 +279,16 @@ def run():
                     )
                 logger.info(f"Current score: {current_score:.6f}, Best score: {best_score:.6f}")
 
+                # Save grading history to JSON
+                grading_history = update_grading_history(
+                    grading_history, step, current_score, stats, cfg.log_dir
+                )
+            else:
+                # Even if grading failed, record it in history
+                grading_history = update_grading_history(
+                    grading_history, step, float('nan'), stats, cfg.log_dir
+                )
+
             # Save memory periodically
             if (step + 1) % 5 == 0:
                 memory.save()
@@ -262,6 +301,9 @@ def run():
             continue
 
     console.print("\n[bold yellow]Control panel stopped - Generating final summary...[/bold yellow]\n")
+
+    # Save final grading history
+    save_grading_history(grading_history, cfg.log_dir)
 
     # Cleanup
     interpreter.cleanup_session(-1)
@@ -294,6 +336,7 @@ def run():
         console.print(f"[yellow]  Best score: {best_score:.6f}[/yellow]")
         console.print(f"[yellow]  Final score: {best_score_history[-1]:.6f}[/yellow]")
         console.print(f"[yellow]  Score history (last 10): {best_score_history[-10:]}[/yellow]")
+        console.print(f"[yellow]  Grading history saved to: {cfg.log_dir / 'grading_history.json'}[/yellow]")
 
         logger.info("=" * 60)
         logger.info("=== Grading Summary ===")
@@ -301,6 +344,7 @@ def run():
         logger.info(f"Best score: {best_score:.6f}")
         logger.info(f"Final score: {best_score_history[-1]:.6f}")
         logger.info(f"Score history (last 10): {best_score_history[-10:]}")
+        logger.info(f"Grading history saved to: {cfg.log_dir / 'grading_history.json'}")
         logger.info("=" * 60)
 
     elapsed_time = time.time() - begin_time
