@@ -17,6 +17,8 @@ def determine_provider(model: str) -> str:
 
 provider_to_query_func = {
     "openai": backend_openai.query,
+    "deepseek-chat": backend_openai.query,
+    "deepseek-reasoner": backend_openai.query,
     "qwen": backend_qwen.query
 }
 

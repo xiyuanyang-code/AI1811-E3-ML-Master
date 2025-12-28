@@ -17,6 +17,7 @@ dependencies = [
     "ipython>=9.6.0",
     "jsonschema>=4.25.1",
     "lightgbm>=4.6.0",
+    "matplotlib>=3.10.8",
     "omegaconf>=2.3.0",
     "openai>=2.6.1",
     "optuna>=4.5.0",
